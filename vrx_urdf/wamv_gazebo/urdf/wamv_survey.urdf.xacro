@@ -1,0 +1,157 @@
+<?xml version="1.0"?>
+<!--
+  WAM-V survey configuration for coastal mapping tests.
+
+  Sensors (positions in wamv/base_link: x forward, y port, z up; z = 0 is
+  the pontoon bottom, deck ~1.3 m, still-water draft ~0.1 m)
+    * 3D LiDAR 16-beam, level mast mount      (0.70, 0.00, 2.30), rpy 0 0 0
+    * Omniscan 3D 450 SS proxy, nadir         (0.40, 0.00, -0.30)
+    * IMU 200 Hz (deck)                       (0.30, -0.20, 1.30)
+    * GPS / NavSat (deck, aft)                (-0.85, 0.00, 1.30)
+    * Front camera, ground-truth odometry 50 Hz
+
+  Omniscan 3D 450 SS proxy (vendor specs, docs.ceruleansonar.com/c/omniscan3d):
+    modelled:  cross-track fan 90 deg (TX -10 dB), <1 deg angular sampling
+               (0.5 deg), max 3D range 100 m, up to 20 Hz, range quantisation
+               ~range/1000 (0.02 m) + noise, sonar-style frame
+               (x = boresight, y = starboard: positive angles to starboard)
+    not modelled: 0.8 deg along-track footprint (single ray row),
+               interferometric angle noise, TOF / power / sound speed, auto
+               range and 5 % minimum start range, water-column targets,
+               multipath, built-in pitch/roll IMU.
+    Mounting: nadir as requested for now. Cerulean recommends 30-45 deg down
+    from horizontal and states the real unit does not support facing straight
+    down (it can confuse port/starboard) - use sonar_tilt_deg for side-looking.
+    Gazebo has no acoustic sensor: this is a GPU ray fan whose visibility mask
+    skips the water surface, so it returns seabed geometry.
+-->
+<robot xmlns:xacro="http://ros.org/wiki/xacro" name="WAM-V">
+  <!-- Arguments passed by vrx_gz.model.Model.xacro_cmd (kept for compatibility) -->
+  <xacro:arg name="locked" default="false"/>
+  <xacro:arg name="thruster_config" default="H"/>
+  <xacro:arg name="vrx_sensors_enabled" default="false"/>
+  <xacro:arg name="namespace" default="wamv"/>
+  <xacro:arg name="macros_file" default="$(find wamv_gazebo)/urdf/macros.xacro"/>
+
+  <!-- Survey sensor parameters -->
+  <xacro:arg name="lidar_type" default="16_beam"/>          <!-- 16_beam | 32_beam -->
+  <xacro:arg name="sonar_beams" default="181"/>             <!-- 0.5 deg over 90 deg -->
+  <xacro:arg name="sonar_swath_deg" default="90"/>
+  <xacro:arg name="sonar_rate" default="20"/>
+  <xacro:arg name="sonar_min_range" default="0.5"/>
+  <xacro:arg name="sonar_max_range" default="100"/>
+  <xacro:arg name="sonar_range_resolution" default="0.02"/>
+  <xacro:arg name="sonar_noise" default="0.02"/>
+  <xacro:arg name="sonar_tilt_deg" default="0"/>            <!-- 0 = nadir; + rolls boresight to starboard -->
+  <xacro:arg name="gt_odom_rate" default="50"/>
+
+  <xacro:property name="thruster_namespace" value="thrusters/" scope="global"/>
+  <xacro:property name="camera_namespace" value="cameras/" scope="global"/>
+  <xacro:property name="sensor_namespace" value="sensors/" scope="global"/>
+  <xacro:property name="acoustic_namespace" value="acoustics/" scope="global"/>
+  <xacro:property name="shooter_namespace" value="shooters/" scope="global"/>
+  <xacro:property name="namespace" value="$(arg namespace)" scope="global"/>
+
+  <!-- Platform, hydrodynamics, thrusters -->
+  <xacro:include filename="$(find wamv_gazebo)/urdf/wamv_gazebo.xacro"/>
+  <xacro:include filename="$(find wamv_description)/urdf/battery.xacro"/>
+  <xacro:battery prefix="left" position="0 1 0.45" orientation="0 0 0"/>
+  <xacro:battery prefix="right" position="0 -1 0.45" orientation="0 0 0"/>
+  <xacro:wamv_gazebo thruster_layout="$(find wamv_gazebo)/urdf/thruster_layouts/wamv_aft_thrusters.xacro"/>
+
+  <gazebo>
+    <plugin filename="libgz-sim-pose-publisher-system.so"
+            name="gz::sim::systems::PosePublisher">
+      <publish_link_pose>false</publish_link_pose>
+      <publish_sensor_pose>true</publish_sensor_pose>
+      <publish_collision_pose>false</publish_collision_pose>
+      <publish_visual_pose>false</publish_visual_pose>
+      <publish_nested_model_pose>false</publish_nested_model_pose>
+      <publish_model_pose>false</publish_model_pose>
+      <use_pose_vector_msg>true</use_pose_vector_msg>
+      <static_publisher>false</static_publisher>
+      <static_update_frequency>1</static_update_frequency>
+    </plugin>
+    <plugin filename="gz-sim-joint-state-publisher-system"
+            name="gz::sim::systems::JointStatePublisher">
+    </plugin>
+    <!-- Ground-truth 6-DoF odometry: gz topic /model/wamv/odometry -->
+    <plugin filename="gz-sim-odometry-publisher-system"
+            name="gz::sim::systems::OdometryPublisher">
+      <dimensions>3</dimensions>
+      <odom_publish_frequency>$(arg gt_odom_rate)</odom_publish_frequency>
+      <odom_frame>world</odom_frame>
+      <robot_base_frame>$(arg namespace)/base_link</robot_base_frame>
+    </plugin>
+  </gazebo>
+
+  <xacro:include filename="$(find wamv_description)/urdf/cpu_cases.xacro"/>
+  <xacro:cpu_cases position="-0.15 0 1.53" orientation="0 0 0"/>
+
+  <xacro:wamv_camera name="front_camera" x="0.75" y="0.3" P="${radians(15)}"/>
+  <xacro:wamv_gps name="gps_wamv" x="-0.85"/>
+  <xacro:wamv_imu name="imu_wamv" y="-0.2" update_rate="200"/>
+  <!-- Level mount (pitch 0) so the +/-15 deg fan covers shoreline and cliffs.
+       2.3 m mast: at 1.8 m the -15 deg beams hit the deck CPU cases (~19 %
+       of returns, blocking the aft view). -->
+  <xacro:lidar name="lidar_wamv" type="$(arg lidar_type)" x="0.7" y="0" z="2.3" R="0" P="0" Y="0"/>
+
+  <!-- ===== Omniscan 3D 450 SS proxy (hull pole mount between pontoons) ===== -->
+  <link name="${namespace}/omniscan3d_link">
+    <visual>
+      <origin xyz="0 0 0.25" rpy="0 0 0"/>
+      <geometry><cylinder radius="0.02" length="0.5"/></geometry>
+      <material name="omniscan_pole"><color rgba="0.2 0.2 0.2 1.0"/></material>
+    </visual>
+    <visual>
+      <geometry><box size="0.20 0.10 0.07"/></geometry>
+      <material name="omniscan_body"><color rgba="0.05 0.25 0.55 1.0"/></material>
+    </visual>
+    <inertial>
+      <mass value="1.06"/>
+      <inertia ixx="0.002" iyy="0.004" izz="0.004" ixy="0" ixz="0" iyz="0"/>
+    </inertial>
+  </link>
+  <!-- Link frame = vessel axes (x fwd, y port, z up) at the acoustic centre. -->
+  <joint name="${namespace}/base_to_omniscan3d_joint" type="fixed">
+    <origin xyz="0.4 0 -0.30" rpy="0 0 0"/>
+    <parent link="${namespace}/base_link"/>
+    <child link="${namespace}/omniscan3d_link"/>
+  </joint>
+  <!-- Sensor frame: x = boresight (down), y = starboard, z = aft
+       (rpy = pi, pi/2, 0), so positive beam angles point to starboard as in
+       OS3D_POINT_SET. sonar_tilt_deg rolls the boresight toward starboard. -->
+  <gazebo reference="${namespace}/omniscan3d_link">
+    <sensor type="gpu_lidar" name="omniscan3d_sensor">
+      <pose>0 0 0 ${pi - radians($(arg sonar_tilt_deg))} ${pi/2} 0</pose>
+      <update_rate>$(arg sonar_rate)</update_rate>
+      <lidar>
+        <visibility_mask>7</visibility_mask>
+        <scan>
+          <horizontal>
+            <samples>$(arg sonar_beams)</samples>
+            <resolution>1</resolution>
+            <min_angle>${-radians($(arg sonar_swath_deg)) / 2}</min_angle>
+            <max_angle>${radians($(arg sonar_swath_deg)) / 2}</max_angle>
+          </horizontal>
+          <vertical>
+            <samples>1</samples>
+            <resolution>1</resolution>
+            <min_angle>0</min_angle>
+            <max_angle>0</max_angle>
+          </vertical>
+        </scan>
+        <range>
+          <min>$(arg sonar_min_range)</min>
+          <max>$(arg sonar_max_range)</max>
+          <resolution>$(arg sonar_range_resolution)</resolution>
+        </range>
+        <noise>
+          <type>gaussian</type>
+          <mean>0.0</mean>
+          <stddev>$(arg sonar_noise)</stddev>
+        </noise>
+      </lidar>
+    </sensor>
+  </gazebo>
+</robot>
