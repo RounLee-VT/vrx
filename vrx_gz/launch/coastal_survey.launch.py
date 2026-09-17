@@ -10,10 +10,12 @@ Besides the standard VRX bridges this starts:
     tree (pose_tf_broadcaster) with the robot_state_publisher / sensor tree,
     so everything resolves in the 'world' frame
   * /wamv/ground_truth/odometry (nav_msgs/Odometry, world frame, 50 Hz)
-  * lidar_water_filter: /wamv/sensors/lidars/lidar_wamv_sensor/points_filtered
-    (LiDAR without returns below the water surface)
+  * lidar_sim: /wamv/sensors/lidars/lidar_wamv_sensor/points_filtered
+    (no through-water or own-vessel returns; material-dependent intensity,
+    signal_db, detection limit and material label)
   * omniscan3d_sim: /wamv/sensors/sonars/omniscan3d/points (x y z angle tof pwr
-    pt_type) and .../os3d_point_set (Cerulean Ping Protocol packets, id 3104)
+    pt_type material) and .../os3d_point_set (Cerulean Ping Protocol packets,
+    id 3104); pwr uses material-dependent backscatter
   * RViz with config/coastal_survey.rviz (rviz:=true, default)
 
 See vrx_gz/worlds/coastal/README.md.
@@ -69,14 +71,15 @@ def launch(context, *args, **kwargs):
                        '--child-frame-id', 'wamv/wamv/base_link'],
             parameters=[{'use_sim_time': True}]))
         actions.append(Node(
-            package='vrx_gz', executable='lidar_water_filter.py',
-            name='lidar_water_filter', output='screen',
-            parameters=[{'use_sim_time': True, 'water_level': 0.0, 'margin': 0.0}]))
+            package='vrx_gz', executable='lidar_sim.py',
+            name='lidar_sim', output='screen',
+            parameters=[{'use_sim_time': True, 'world': world,
+                         'water_level': 0.0, 'margin': 0.0}]))
         fresh = world.startswith('claytor_lake')   # reservoir: fresh water
         actions.append(Node(
             package='vrx_gz', executable='omniscan3d_sim.py',
             name='omniscan3d_sim', output='screen',
-            parameters=[{'use_sim_time': True,
+            parameters=[{'use_sim_time': True, 'world': world,
                          'sound_speed_mps': 1480.0 if fresh else 1500.0,
                          'absorption_db_per_m': 0.05 if fresh else 0.12}]))
         if cfg('rviz').lower() == 'true':

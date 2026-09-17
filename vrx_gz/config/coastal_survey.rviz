@@ -85,7 +85,7 @@ Visualization Manager:
       Max Intensity: 1
       Min Color: 0; 0; 0
       Min Intensity: 0
-      Name: LiDAR (above water)
+      Name: LiDAR (above water, height)
       Position Transformer: XYZ
       Selectable: true
       Size (Pixels): 3
@@ -100,6 +100,39 @@ Visualization Manager:
       Use Fixed Frame: true
       Use rainbow: true
       Value: true
+    - Alpha: 1
+      Autocompute Intensity Bounds: true
+      Autocompute Value Bounds:
+        Max Value: 30
+        Min Value: 0
+        Value: false
+      Axis: Z
+      Channel Name: intensity
+      Class: rviz_default_plugins/PointCloud2
+      Color: 255; 255; 255
+      Color Transformer: Intensity
+      Decay Time: 0
+      Enabled: false
+      Invert Rainbow: false
+      Max Color: 255; 255; 255
+      Max Intensity: 1
+      Min Color: 0; 0; 0
+      Min Intensity: 0
+      Name: LiDAR intensity (material x incidence)
+      Position Transformer: XYZ
+      Selectable: true
+      Size (Pixels): 3
+      Size (m): 0.12
+      Style: Flat Squares
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Best Effort
+        Value: /wamv/sensors/lidars/lidar_wamv_sensor/points_filtered
+      Use Fixed Frame: true
+      Use rainbow: true
+      Value: false
     - Alpha: 1
       Autocompute Intensity Bounds: true
       Autocompute Value Bounds:

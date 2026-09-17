@@ -1,0 +1,31 @@
+# Surface materials used to synthesise LiDAR intensity and sonar backscatter.
+#
+# lidar_reflectivity: diffuse reflectance at ~905 nm (0-1). Representative
+#   values for these surface types (dry quartz sand ~0.4-0.5, green vegetation
+#   ~0.4-0.5 on the NIR plateau, wet surfaces roughly half of dry, dark algae /
+#   mud ~0.1). Approximate - tune against real sensor data.
+# sonar_mu_db: Lambert backscatter parameter mu at ~450 kHz (dB),
+#   BS = mu + 10 log10(cos^2 theta_i). Typical high-frequency ranges: mud
+#   about -35 to -40, sand -25 to -30, shell/gravel -20, rock -15 to -20
+#   (cf. APL-UW High-Frequency Ocean Environmental Models Handbook,
+#   TR 9407). Approximate - tune against real Omniscan data.
+#
+# ids are stored in the material maps (worlds/coastal/ground_truth/
+# *_materials.npz) and in the 'material' field of the simulated clouds.
+materials:
+  - {id: 0,  name: unknown,     lidar_reflectivity: 0.30, sonar_mu_db: -30.0}
+  - {id: 1,  name: sand_dry,    lidar_reflectivity: 0.45, sonar_mu_db: -27.0}
+  - {id: 2,  name: sand_wet,    lidar_reflectivity: 0.25, sonar_mu_db: -27.0}
+  - {id: 3,  name: sand_seabed, lidar_reflectivity: 0.25, sonar_mu_db: -27.0}
+  - {id: 4,  name: mud,         lidar_reflectivity: 0.10, sonar_mu_db: -36.0}
+  - {id: 5,  name: grass,       lidar_reflectivity: 0.45, sonar_mu_db: -30.0}
+  - {id: 6,  name: forest,      lidar_reflectivity: 0.35, sonar_mu_db: -30.0}
+  - {id: 7,  name: marsh,       lidar_reflectivity: 0.30, sonar_mu_db: -30.0}
+  - {id: 8,  name: bare_soil,   lidar_reflectivity: 0.30, sonar_mu_db: -30.0}
+  - {id: 9,  name: rock,        lidar_reflectivity: 0.40, sonar_mu_db: -18.0}
+  - {id: 10, name: rock_wet,    lidar_reflectivity: 0.20, sonar_mu_db: -18.0}
+  - {id: 11, name: algae,       lidar_reflectivity: 0.10, sonar_mu_db: -22.0}
+  - {id: 12, name: oyster_reef, lidar_reflectivity: 0.30, sonar_mu_db: -20.0}
+  - {id: 13, name: talus,       lidar_reflectivity: 0.40, sonar_mu_db: -16.0}
+  - {id: 14, name: concrete,    lidar_reflectivity: 0.35, sonar_mu_db: -15.0}
+  - {id: 15, name: object,      lidar_reflectivity: 0.50, sonar_mu_db: -15.0}

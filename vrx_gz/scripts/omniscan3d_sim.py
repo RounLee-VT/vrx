@@ -15,14 +15,16 @@ Per ping this node:
   3. Power (relative dB), sonar equation:
        pwr = SL - 2 TL(r) + BS(theta_i) + B_tx(angle) + speckle
        TL = 20 log10 r + alpha r      (spherical spreading + absorption)
-       BS = mu + 10 log10 cos^2 theta_i   (Lambert's law; theta_i from the
-                                           local surface normal of the raw grid)
+       BS = mu(material) + 10 log10 cos^2 theta_i
+            (Lambert's law; mu per material from the world's material map,
+             theta_i from the local surface normal of the raw grid)
        B_tx = -10 dB * (angle / 45 deg)^2 (90 deg TX beam, -10 dB edge)
        speckle: Rayleigh amplitude -> exponentially distributed power
   4. Range noise and quantisation, then drops echoes below the noise floor.
 
 Outputs:
-  ~/points (PointCloud2, sensor frame): x y z angle tof pwr pt_type
+  ~/points (PointCloud2, sensor frame): x y z angle tof pwr pt_type material
+      (material: ground-truth label, see config/coastal_materials.yaml)
   ~/os3d_point_set (std_msgs/UInt8MultiArray): one Cerulean Ping Protocol
       packet per ping, packet id 3104, payload laid out as documented in
       docs.ceruleansonar.com/c/omniscan3d/technical-details/api/os3d_point_set
@@ -40,9 +42,13 @@ import numpy as np
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
+from rclpy.time import Time
 from sensor_msgs.msg import PointCloud2, PointField
 from sensor_msgs_py import point_cloud2 as pc2
 from std_msgs.msg import UInt8MultiArray
+import tf2_ros
+
+from vrx_gz.coastal_materials import MaterialMap
 
 OS3D_POINT_SET_ID = 3104
 HEADER_FMT = '<IfHHIQIBBBBfff9I'          # 80 bytes, see vendor API page
@@ -101,7 +107,9 @@ class Omniscan3DSim(Node):
         p('sound_speed_mps', 1500.0)
         p('absorption_db_per_m', 0.12)       # ~seawater @450 kHz; fresh ~0.05
         p('source_level_db', 0.0)
-        p('backscatter_mu_db', -27.0)        # Lambert parameter (sand-like)
+        p('world', '')
+        p('world_frame', 'world')
+        p('backscatter_mu_db', -27.0)        # used where no material map exists
         p('tx_edge_loss_db', 10.0)           # at +/- tx_half_angle_deg
         p('tx_half_angle_deg', 45.0)
         p('along_track_beamwidth_deg', 0.8)
@@ -118,6 +126,12 @@ class Omniscan3DSim(Node):
         self.rng = np.random.default_rng(g('seed') or None)
         self.ping = 0
         self.t0_ms = None
+        self.materials = MaterialMap(g('world'))
+        if not self.materials.available:
+            self.get_logger().warn(f"no material map for world '{g('world')}': "
+                                   f"using backscatter_mu_db={g('backscatter_mu_db')}")
+        self.tf_buffer = tf2_ros.Buffer()
+        self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, self)
         self.pub = self.create_publisher(PointCloud2, g('output_topic'), 5)
         self.pub_pkt = self.create_publisher(UInt8MultiArray, g('packet_topic'), 5)
         self.create_subscription(PointCloud2, g('input_topic'), self.cb,
@@ -130,10 +144,12 @@ class Omniscan3DSim(Node):
             PointField(name='tof', offset=16, datatype=PointField.FLOAT32, count=1),
             PointField(name='pwr', offset=20, datatype=PointField.FLOAT32, count=1),
             PointField(name='pt_type', offset=24, datatype=PointField.UINT8, count=1),
+            PointField(name='material', offset=25, datatype=PointField.UINT8, count=1),
         ]
-        self.dtype = np.dtype({'names': ['x', 'y', 'z', 'angle', 'tof', 'pwr', 'pt_type'],
-                               'formats': ['<f4'] * 6 + ['u1'],
-                               'offsets': [0, 4, 8, 12, 16, 20, 24], 'itemsize': 28})
+        self.dtype = np.dtype({'names': ['x', 'y', 'z', 'angle', 'tof', 'pwr', 'pt_type',
+                                         'material'],
+                               'formats': ['<f4'] * 6 + ['u1', 'u1'],
+                               'offsets': [0, 4, 8, 12, 16, 20, 24, 25], 'itemsize': 28})
 
     # ------------------------------------------------------------------
     def cb(self, msg):
@@ -170,10 +186,38 @@ class Omniscan3DSim(Node):
         # incidence angle from the local surface normal of the raw grid
         cos_i = self.incidence_cos(Pz, valid)
 
+        # material of each echo (world-frame lookup at the beam centre)
+        mat = np.full(r.shape, self.materials.unknown_id, np.uint8)
+        mu = np.full(r.shape, g('backscatter_mu_db'))
+        if self.materials.available:
+            try:
+                # Non-blocking: at 20 Hz a wait would drop pings; the latest TF
+                # is at most a few ms off, negligible for a material lookup.
+                try:
+                    tf = self.tf_buffer.lookup_transform(
+                        g('world_frame'), msg.header.frame_id,
+                        Time.from_msg(msg.header.stamp))
+                except tf2_ros.ExtrapolationException:
+                    tf = self.tf_buffer.lookup_transform(g('world_frame'),
+                                                         msg.header.frame_id, Time())
+                q, t = tf.transform.rotation, tf.transform.translation
+                x, y, z, w = q.x, q.y, q.z, q.w
+                Rw = np.array([[1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
+                               [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
+                               [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)]])
+                rs = np.nan_to_num(r)
+                ps = np.stack([rs * np.cos(np.nan_to_num(col_angle)),
+                               rs * np.sin(np.nan_to_num(col_angle)), np.zeros_like(rs)], -1)
+                ids, _ = self.materials.classify(ps @ Rw.T + [t.x, t.y, t.z])
+                mat = ids
+                mu = self.materials.table.mu_db[ids].astype(np.float64)
+            except tf2_ros.TransformException:
+                pass
+
         # 2./3. sonar equation
         with np.errstate(invalid='ignore', divide='ignore'):
             tl = 20.0 * np.log10(np.maximum(r, 0.1)) + g('absorption_db_per_m') * r
-            bs = g('backscatter_mu_db') + 10.0 * np.log10(np.maximum(cos_i ** 2, 1e-4))
+            bs = mu + 10.0 * np.log10(np.maximum(cos_i ** 2, 1e-4))
             ang_deg = np.degrees(col_angle)
             btx = -g('tx_edge_loss_db') * (ang_deg / g('tx_half_angle_deg')) ** 2
             pwr = g('source_level_db') - 2.0 * tl + bs + btx
@@ -189,13 +233,14 @@ class Omniscan3DSim(Node):
             rn = np.round(rn / res) * res
         rn = np.maximum(rn, 0.0)
 
-        a, rr, pw = col_angle[ok], rn[ok], pwr[ok]
+        a, rr, pw, mt = col_angle[ok], rn[ok], pwr[ok], mat[ok]
         sos = g('sound_speed_mps')
         tof = (2.0 if g('tof_two_way') else 1.0) * rr / sos
 
         pts = np.zeros(len(a), dtype=self.dtype)
         pts['x'], pts['y'], pts['z'] = rr * np.cos(a), rr * np.sin(a), 0.0
         pts['angle'], pts['tof'], pts['pwr'], pts['pt_type'] = a, tof, pw, 0
+        pts['material'] = mt
         out = PointCloud2()
         out.header = msg.header
         out.height, out.width = 1, len(pts)

@@ -191,7 +191,7 @@ ament_python_install_package(
 )
 
 install(PROGRAMS
-  scripts/lidar_water_filter.py
+  scripts/lidar_sim.py
   scripts/omniscan3d_sim.py
   DESTINATION lib/${PROJECT_NAME})
 

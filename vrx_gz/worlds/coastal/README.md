@@ -22,9 +22,10 @@ NOAA data and the rest procedurally, with exact ground truth.
 |---|---|
 | `vrx_gz/worlds/{claytor_lake_calm,cliff_coast_epoch0-2,nbs_surf_epoch0-2,ocean_view_norfolk}.sdf` | worlds |
 | `vrx_gz/models/*_terrain/` | terrain meshes and textures (generated) |
-| `vrx_gz/launch/coastal_survey.launch.py` | launch: world + survey WAM-V + bridges + TF join + LiDAR water filter + RViz |
+| `vrx_gz/launch/coastal_survey.launch.py` | launch: world + survey WAM-V + bridges + TF join + LiDAR/sonar post-processing + RViz |
 | `vrx_gz/config/coastal_survey.rviz` | RViz layout |
-| `vrx_gz/scripts/lidar_water_filter.py` | removes through-water and self LiDAR returns |
+| `vrx_gz/scripts/lidar_sim.py` | LiDAR: removes through-water and self returns; material-dependent intensity, detection limit, material label |
+| `vrx_gz/src/vrx_gz/coastal_materials.py`, `vrx_gz/config/coastal_materials.yaml` | material map lookup and material property table (LiDAR reflectivity, sonar backscatter) |
 | `vrx_gz/scripts/omniscan3d_sim.py` | Omniscan 3D output: along-track beam merge, TOF, power, `OS3D_POINT_SET` packets |
 | `vrx_gz/config/coastal_spawn_poses.yaml` | default spawn pose per world |
 | `vrx_gz/config/nbs_survey_transects.yaml` | repeat-survey lines |
@@ -64,7 +65,7 @@ vertical bias against the GT DEM (σ 0.02 m).
 | Sensor | Position (m) | Orientation | ROS topic (frame) |
 |---|---|---|---|
 | 3D LiDAR 16-beam ±15°, 10 Hz | (0.70, 0.00, 2.30) | level (rpy 0 0 0) | `/wamv/sensors/lidars/lidar_wamv_sensor/points` (raw), `.../points_filtered` (above water, no self-hits) |
-| Omniscan 3D 450 SS proxy | (0.40, 0.00, −0.30), ~0.4 m below waterline | nadir; sensor frame x = down, y = starboard | `/wamv/sensors/sonars/omniscan3d/points` (x y z angle tof pwr pt_type), `.../os3d_point_set` (raw packets); raw ray geometry: `/wamv/sensors/lidars/omniscan3d_sensor/points` |
+| Omniscan 3D 450 SS proxy | (0.40, 0.00, −0.30), ~0.4 m below waterline | nadir; sensor frame x = down, y = starboard | `/wamv/sensors/sonars/omniscan3d/points` (x y z angle tof pwr pt_type), `.../os3d_point_set` (raw packets), plus a `material` label field; raw ray geometry: `/wamv/sensors/lidars/omniscan3d_sensor/points` |
 | IMU 200 Hz | (0.30, −0.20, 1.30) | aligned | `/wamv/sensors/imu/imu/data` |
 | GPS (NavSat) | (−0.85, 0.00, 1.30) | aligned | `/wamv/sensors/gps/gps/fix` |
 | Front camera | (0.75, 0.30, ~1.5) | pitched 15° down | `/wamv/sensors/cameras/front_camera_sensor/image_raw` |
@@ -74,12 +75,42 @@ vertical bias against the GT DEM (σ 0.02 m).
 the robot/sensor tree (`wamv/wamv/base_link → ...`) with an identity static
 transform, so every sensor frame resolves in `world`.
 
-**LiDAR through water:** VRX GPU LiDARs ignore the wave visual (visibility mask
-7), so raw beams pass through the water and return the seabed; in the cliff
-world this is 55–75 % of the points. A real near-IR LiDAR gets no such
-returns. `lidar_water_filter.py` removes points below the water level (world
-z < 0), using the TF at the scan time. It also removes hits on the own
-vessel. Use `points_filtered` for above-water mapping.
+**LiDAR post-processing (`lidar_sim.py`, topic `points_filtered`).** Use this topic rather than the raw cloud.
+
+* **Through-water returns:** VRX GPU LiDARs ignore the wave visual (visibility
+  mask 7), so raw beams pass through the water and return the seabed; in the
+  cliff world this is 55–75 % of the points. A real near-IR LiDAR gets no such
+  returns. The node removes points below the water level (world z < 0), using
+  the TF at the scan time.
+* **Own vessel:** hits inside a crop box around the hull are removed.
+* **Intensity:** Gazebo's intensity channel is always 0 here: it only
+  supports one `laser_retro` value per visual, and each terrain is a single
+  mesh. The node therefore synthesises
+  `intensity = 100 · ρ(material) · cos θᵢ · (1 + 5 % noise)`, on a
+  Velodyne-style calibrated scale where 0–100 covers diffuse targets.
+  * ρ is the ~905 nm reflectivity of the point's material, looked up in the
+    world's material map.
+  * θᵢ is the incidence angle, from the scan-grid surface normal, falling
+    back to the ground-truth DEM normal for grazing terrain hits.
+* **Detection limit:** returns with `ρ·cos θᵢ·(100 m / r)² < 0.10` are
+  dropped, i.e. a 10 % target is detected out to 100 m. Dark or grazing
+  surfaces therefore drop out at long range.
+* **Output fields:** `x y z intensity signal_db ring material`.
+  `signal_db = 10 log10(ρ cos θᵢ / r²)` is the range-dependent return
+  strength, and `material` is a ground-truth label.
+
+**Material maps.** `vrx_gz/worlds/coastal/scripts/gen_material_maps.py`
+builds `ground_truth/<world>_materials.npz/.png` from the exported masks and
+elevation rules; it does not touch the meshes.
+
+* Materials: sand (dry, wet, seabed), mud, grass, forest, marsh, bare soil,
+  rock, wet rock, algae, oyster reef, talus, concrete, and `object` for
+  anything standing clear of the terrain (targets, pilings).
+* The cliff world also classifies the 3D cliff face and sea stacks by height:
+  rock, wet rock in the splash zone, algae in the intertidal band.
+* Per-material LiDAR reflectivity and sonar Lambert μ are in
+  `config/coastal_materials.yaml`. They are representative literature-range
+  values and must be tuned against real sensor data.
 
 **Omniscan 3D 450 SS proxy.** Specs are from [Cerulean docs](https://docs.ceruleansonar.com/c/omniscan3d/technical-details/specifications).
 
@@ -101,7 +132,7 @@ output:
 * `tof = 2 r / c` (two-way), with `c` = 1500 m/s (sea) or 1480 m/s (Claytor Lake).
 * `pwr` (relative dB) from the sonar equation `SL − 2·TL + BS + B_tx + speckle`:
   * `TL = 20 log10 r + α r`, with α = 0.12 dB/m (sea) or 0.05 dB/m (fresh water), both approximate.
-  * `BS = μ + 10 log10 cos²θᵢ` (Lambert's law, μ = −27 dB). θᵢ comes from the true local surface normal of the ray grid.
+  * `BS = μ(material) + 10 log10 cos²θᵢ` (Lambert's law). μ comes from the world's material map, e.g. mud −36, sand −27, rock −18, talus −16 dB. θᵢ comes from the true local surface normal of the ray grid.
   * `B_tx = −10 dB · (angle/45°)²`.
   * Rayleigh speckle.
 * Echoes below the −110 dB noise floor are dropped. The per-ping `pwr_threshold_high/med/low` are floor + 20/12/6 dB.
@@ -120,7 +151,7 @@ need calibration against real data.
 
 Not modelled: interferometric angle noise, auto range and the 5 % minimum
 start range, sound-speed refraction, multipath, water-column targets,
-material-dependent backscatter, and the built-in pitch/roll IMU (the vessel IMU
+sub-material texture (grain size, vegetation) within a material class, and the built-in pitch/roll IMU (the vessel IMU
 is used instead). Gazebo has no acoustic sensor, so the geometry comes from a
 GPU ray fan that skips the water surface.
 Sensor parameters are xacro args at the top of the file (`sonar_*`,
