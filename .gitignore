@@ -5,3 +5,8 @@ syntax: glob
 *.orig
 *.*~
 *.pyc
+# Generated coastal simulation assets (~700 MB).
+# Create with vrx_gz/worlds/coastal/scripts/generate_all.sh
+/vrx_gz/models/*_terrain/
+/vrx_gz/models/*_terrain_epoch*/
+/vrx_gz/worlds/coastal/ground_truth/

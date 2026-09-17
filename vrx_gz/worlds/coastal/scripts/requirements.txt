@@ -1,0 +1,8 @@
+# Python packages for the coastal world generators
+# (rasterio is only needed for ocean_view_norfolk and GeoTIFF export)
+numpy
+scipy
+pillow
+matplotlib
+pyyaml
+rasterio

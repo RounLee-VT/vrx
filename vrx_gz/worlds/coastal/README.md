@@ -21,7 +21,7 @@ NOAA data and the rest procedurally, with exact ground truth.
 | Path (in the vrx repo) | Content |
 |---|---|
 | `vrx_gz/worlds/{claytor_lake_calm,cliff_coast_epoch0-2,nbs_surf_epoch0-2,ocean_view_norfolk}.sdf` | worlds |
-| `vrx_gz/models/*_terrain/` | terrain meshes and textures (generated) |
+| `vrx_gz/models/*_terrain*/` | terrain meshes and textures (**generated, not in git**) |
 | `vrx_gz/launch/coastal_survey.launch.py` | launch: world + survey WAM-V + bridges + TF join + LiDAR/sonar post-processing + RViz |
 | `vrx_gz/config/coastal_survey.rviz` | RViz layout |
 | `vrx_gz/scripts/lidar_sim.py` | LiDAR: removes through-water and self returns; material-dependent intensity, detection limit, material label |
@@ -30,12 +30,19 @@ NOAA data and the rest procedurally, with exact ground truth.
 | `vrx_gz/config/coastal_spawn_poses.yaml` | default spawn pose per world |
 | `vrx_gz/config/nbs_survey_transects.yaml` | repeat-survey lines |
 | `vrx_urdf/wamv_gazebo/urdf/wamv_survey.urdf.xacro` | survey WAM-V |
-| `vrx_gz/worlds/coastal/scripts/` | generators |
-| `vrx_gz/worlds/coastal/ground_truth/` | DEMs, masks, targets, change maps |
+| `vrx_gz/worlds/coastal/scripts/` | generators (`generate_all.sh`, `requirements.txt`) |
+| `vrx_gz/worlds/coastal/ground_truth/` | DEMs, masks, targets, change maps, material maps (**generated, not in git**) |
 
 ## Run
 
+The terrain meshes and ground truth (~700 MB) are generated, not tracked in
+git, so generate them once after cloning:
+
 ```bash
+cd ~/workspace/simulator/vrx/vrx_gz/worlds/coastal/scripts
+pip install -r requirements.txt     # numpy scipy pillow matplotlib pyyaml rasterio
+./generate_all.sh                   # ~40 s; --skip-ocean-view to skip the NOAA download
+
 cd ~/workspace/simulator
 colcon build --merge-install --packages-select vrx_gz wamv_gazebo
 source install/setup.bash
@@ -235,18 +242,22 @@ Prescribed NBS changes (see `NBS_EPOCHS` in `scripts/gen_synthetic.py`):
 Fine-scale roughness is identical in every epoch, so `dz` contains only the
 prescribed morphological change.
 
-## Regenerate / modify
+## Generate / modify
 
-Generated meshes live in `vrx_gz/models/`. Rebuild `vrx_gz` after regenerating.
+`generate_all.sh` runs all four generators; the output is deterministic, so
+regenerating gives byte-identical files. Run them individually to change a
+world:
 
 ```bash
 cd ~/workspace/simulator/vrx/vrx_gz/worlds/coastal/scripts
-pip install rasterio   # needed for the real DEM and for GeoTIFF export
 python3 gen_synthetic.py [--sea-state calm|light|moderate|rough] [--only lake|nbs]
 python3 gen_cliff_coast.py [--sea-state moderate] [--epochs 0 1 2]
 python3 gen_ocean_view.py [--water-level 0.4] [--sea-state rough] [--res 3.0] \
                           [--bounds W S E N] [--name my_site]
+python3 gen_material_maps.py [--worlds ...]   # after any terrain change
 ```
+
+Rebuild `vrx_gz` afterwards so the assets are installed.
 
 * `--water-level` is in NAVD88 metres. Use it to simulate tide stage: the DEM
   is shifted so that level becomes z = 0.
