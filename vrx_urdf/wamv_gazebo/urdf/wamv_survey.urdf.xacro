@@ -12,13 +12,14 @@
 
   Omniscan 3D 450 SS proxy (vendor specs, docs.ceruleansonar.com/c/omniscan3d):
     modelled:  cross-track fan 90 deg (TX -10 dB), <1 deg angular sampling
-               (0.5 deg), max 3D range 100 m, up to 20 Hz, range quantisation
-               ~range/1000 (0.02 m) + noise, sonar-style frame
-               (x = boresight, y = starboard: positive angles to starboard)
-    not modelled: 0.8 deg along-track footprint (single ray row),
-               interferometric angle noise, TOF / power / sound speed, auto
-               range and 5 % minimum start range, water-column targets,
-               multipath, built-in pitch/roll IMU.
+               (0.5 deg), 0.8 deg along-track beam (5 ray rows merged per
+               beam), max 3D range 100 m, up to 20 Hz, sonar-style frame
+               (x = boresight, y = starboard: positive angles to starboard).
+               vrx_gz/scripts/omniscan3d_sim.py adds TOF, power (sonar
+               equation), range noise/quantisation and OS3D_POINT_SET packets.
+    not modelled: interferometric angle noise, auto range and 5 % minimum
+               start range, water-column targets, multipath, refraction,
+               built-in pitch/roll IMU.
     Mounting: nadir as requested for now. Cerulean recommends 30-45 deg down
     from horizontal and states the real unit does not support facing straight
     down (it can confuse port/starboard) - use sonar_tilt_deg for side-looking.
@@ -40,8 +41,13 @@
   <xacro:arg name="sonar_rate" default="20"/>
   <xacro:arg name="sonar_min_range" default="0.5"/>
   <xacro:arg name="sonar_max_range" default="100"/>
-  <xacro:arg name="sonar_range_resolution" default="0.02"/>
-  <xacro:arg name="sonar_noise" default="0.02"/>
+  <xacro:arg name="sonar_along_track_deg" default="0.8"/>     <!-- one-way TX beam -->
+  <xacro:arg name="sonar_along_track_rays" default="5"/>
+  <!-- Raw ray geometry is kept ideal; range noise/quantisation are applied
+       after beam merging in omniscan3d_sim.py (averaging noisy rays would
+       shrink the noise). -->
+  <xacro:arg name="sonar_range_resolution" default="0.001"/>
+  <xacro:arg name="sonar_noise" default="0.0"/>
   <xacro:arg name="sonar_tilt_deg" default="0"/>            <!-- 0 = nadir; + rolls boresight to starboard -->
   <xacro:arg name="gt_odom_rate" default="50"/>
 
@@ -134,11 +140,12 @@
             <min_angle>${-radians($(arg sonar_swath_deg)) / 2}</min_angle>
             <max_angle>${radians($(arg sonar_swath_deg)) / 2}</max_angle>
           </horizontal>
+          <!-- vertical = along-track (sensor z): rays across the 0.8 deg beam -->
           <vertical>
-            <samples>1</samples>
+            <samples>$(arg sonar_along_track_rays)</samples>
             <resolution>1</resolution>
-            <min_angle>0</min_angle>
-            <max_angle>0</max_angle>
+            <min_angle>${-radians($(arg sonar_along_track_deg)) / 2}</min_angle>
+            <max_angle>${radians($(arg sonar_along_track_deg)) / 2}</max_angle>
           </vertical>
         </scan>
         <range>

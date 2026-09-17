@@ -12,6 +12,8 @@ Besides the standard VRX bridges this starts:
   * /wamv/ground_truth/odometry (nav_msgs/Odometry, world frame, 50 Hz)
   * lidar_water_filter: /wamv/sensors/lidars/lidar_wamv_sensor/points_filtered
     (LiDAR without returns below the water surface)
+  * omniscan3d_sim: /wamv/sensors/sonars/omniscan3d/points (x y z angle tof pwr
+    pt_type) and .../os3d_point_set (Cerulean Ping Protocol packets, id 3104)
   * RViz with config/coastal_survey.rviz (rviz:=true, default)
 
 See vrx_gz/worlds/coastal/README.md.
@@ -70,6 +72,13 @@ def launch(context, *args, **kwargs):
             package='vrx_gz', executable='lidar_water_filter.py',
             name='lidar_water_filter', output='screen',
             parameters=[{'use_sim_time': True, 'water_level': 0.0, 'margin': 0.0}]))
+        fresh = world.startswith('claytor_lake')   # reservoir: fresh water
+        actions.append(Node(
+            package='vrx_gz', executable='omniscan3d_sim.py',
+            name='omniscan3d_sim', output='screen',
+            parameters=[{'use_sim_time': True,
+                         'sound_speed_mps': 1480.0 if fresh else 1500.0,
+                         'absorption_db_per_m': 0.05 if fresh else 0.12}]))
         if cfg('rviz').lower() == 'true':
             actions.append(Node(
                 package='rviz2', executable='rviz2', name='rviz2', output='log',

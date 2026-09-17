@@ -25,6 +25,7 @@ NOAA data and the rest procedurally, with exact ground truth.
 | `vrx_gz/launch/coastal_survey.launch.py` | launch: world + survey WAM-V + bridges + TF join + LiDAR water filter + RViz |
 | `vrx_gz/config/coastal_survey.rviz` | RViz layout |
 | `vrx_gz/scripts/lidar_water_filter.py` | removes through-water and self LiDAR returns |
+| `vrx_gz/scripts/omniscan3d_sim.py` | Omniscan 3D output: along-track beam merge, TOF, power, `OS3D_POINT_SET` packets |
 | `vrx_gz/config/coastal_spawn_poses.yaml` | default spawn pose per world |
 | `vrx_gz/config/nbs_survey_transects.yaml` | repeat-survey lines |
 | `vrx_urdf/wamv_gazebo/urdf/wamv_survey.urdf.xacro` | survey WAM-V |
@@ -63,7 +64,7 @@ vertical bias against the GT DEM (σ 0.02 m).
 | Sensor | Position (m) | Orientation | ROS topic (frame) |
 |---|---|---|---|
 | 3D LiDAR 16-beam ±15°, 10 Hz | (0.70, 0.00, 2.30) | level (rpy 0 0 0) | `/wamv/sensors/lidars/lidar_wamv_sensor/points` (raw), `.../points_filtered` (above water, no self-hits) |
-| Omniscan 3D 450 SS proxy | (0.40, 0.00, −0.30), ~0.4 m below waterline | nadir; sensor frame x = down, y = starboard | `/wamv/sensors/lidars/omniscan3d_sensor/points`, `.../scan` |
+| Omniscan 3D 450 SS proxy | (0.40, 0.00, −0.30), ~0.4 m below waterline | nadir; sensor frame x = down, y = starboard | `/wamv/sensors/sonars/omniscan3d/points` (x y z angle tof pwr pt_type), `.../os3d_point_set` (raw packets); raw ray geometry: `/wamv/sensors/lidars/omniscan3d_sensor/points` |
 | IMU 200 Hz | (0.30, −0.20, 1.30) | aligned | `/wamv/sensors/imu/imu/data` |
 | GPS (NavSat) | (−0.85, 0.00, 1.30) | aligned | `/wamv/sensors/gps/gps/fix` |
 | Front camera | (0.75, 0.30, ~1.5) | pitched 15° down | `/wamv/sensors/cameras/front_camera_sensor/image_raw` |
@@ -86,18 +87,42 @@ vessel. Use `points_filtered` for above-water mapping.
 |---|---|---|
 | Cross-track TX beam | 90° (−10 dB) | 90° fan (±45°) |
 | Angle resolution | < 1° (angle of arrival) | 181 rays, 0.5° |
-| Along-track beam | 0.8° | not modelled (single ray row) |
+| Along-track beam | 0.8° | 5 rays across ±0.4°, merged per beam with a −3 dB-edge beam-pattern weighting (`along_track_mode:=first` keeps the leading edge) |
 | Max range (3D) | 100 m slant | 100 m |
-| Range resolution | up to range/1000 | 0.02 m quantisation + 0.02 m Gaussian noise |
+| Range resolution | up to range/1000 | 0.02 m quantisation + 0.02 m Gaussian noise, applied after beam merging |
 | Ping rate | ≤ 20 Hz (range limited) | 20 Hz |
 | Angle convention | positive to starboard | same (sensor y = starboard) |
-| Output | angle, time of flight, power per point (OS3D_POINT_SET) | x/y/z points and LaserScan (range per angle); no TOF/power |
+| Point data | angle, time of flight, power, pt_type (`OS3D_POINT_SET`) | same fields in PointCloud2, plus byte-exact `OS3D_POINT_SET` packets (id 3104, 80-byte header, 16-byte points, 'BR' framing + checksum) |
 | Mounting | 30–45° down, side-looking; **straight down not supported** by the real unit | nadir (per current plan); `sonar_tilt_deg` xacro arg for side-looking |
 
+`vrx_gz/scripts/omniscan3d_sim.py` turns the ideal ray geometry into sonar
+output:
+
+* `tof = 2 r / c` (two-way), with `c` = 1500 m/s (sea) or 1480 m/s (Claytor Lake).
+* `pwr` (relative dB) from the sonar equation `SL − 2·TL + BS + B_tx + speckle`:
+  * `TL = 20 log10 r + α r`, with α = 0.12 dB/m (sea) or 0.05 dB/m (fresh water), both approximate.
+  * `BS = μ + 10 log10 cos²θᵢ` (Lambert's law, μ = −27 dB). θᵢ comes from the true local surface normal of the ray grid.
+  * `B_tx = −10 dB · (angle/45°)²`.
+  * Rayleigh speckle.
+* Echoes below the −110 dB noise floor are dropped. The per-ping `pwr_threshold_high/med/low` are floor + 20/12/6 dB.
+* A decoder, `decode_os3d_point_set()`, is included in the same file.
+
+Validated in simulation:
+* TOF is exact (≤ 5e-10 s).
+* The nadir `pwr` residual has mean −2.51 dB and std 5.59 dB, matching Rayleigh speckle theory (−2.51 / 5.57).
+* Incidence-angle estimation is exact on synthetic planes sloped up to 40° / 30°.
+* Depth against the GT DEM has mean 0.001 m and std 0.019 m.
+* Packet size and content match the point cloud at 20 Hz.
+
+Assumptions (not in the vendor docs): `tof` is two-way; the absolute `pwr`
+scale, thresholds and backscatter parameters are simulation conventions that
+need calibration against real data.
+
 Not modelled: interferometric angle noise, auto range and the 5 % minimum
-start range, sound-speed refraction, multipath, water-column targets, and the
-built-in pitch/roll IMU. Gazebo has no acoustic sensor, so this is a GPU ray
-fan that skips the water surface and returns seabed geometry.
+start range, sound-speed refraction, multipath, water-column targets,
+material-dependent backscatter, and the built-in pitch/roll IMU (the vessel IMU
+is used instead). Gazebo has no acoustic sensor, so the geometry comes from a
+GPU ray fan that skips the water surface.
 Sensor parameters are xacro args at the top of the file (`sonar_*`,
 `lidar_type`). The VRX spawner passes only its fixed args, so change the
 defaults there.
@@ -112,7 +137,7 @@ another layout.
 * **Water-level grid:** z = 0, 10 m cells.
 * **WAM-V model and sensor frames:** LiDAR, sonar, IMU and GPS axes with names, to check extrinsics.
 * **LiDAR (above water):** coloured by height. Raw LiDAR is a separate display, off by default.
-* **Sonar:** Omniscan3D points kept for 120 s, so the swath map builds up as the boat moves.
+* **Sonar:** Omniscan3D points kept for 120 s, so the swath map builds up as the boat moves. Coloured by depth; a second display coloured by `pwr` is off by default.
 * **Ground-truth track.**
 * **Front camera image.**
 
