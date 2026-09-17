@@ -1,65 +1,125 @@
-# Virtual RobotX (VRX)
-This repository is the home to the source code and software documentation for the VRX simulation environment, which supports simulation of unmanned surface vehicles in marine environments.
-* Designed in coordination with RobotX organizers, this project provides arenas and tasks similar to those featured in past and future RobotX competitions, as well as a description of the WAM-V platform.
-* For RobotX competitors this simulation environment is intended as a first step toward developing tools prototyping solutions in advance of physical on-water testing.
-* We also welcome users with simulation needs beyond RobotX. As we continue to improve the environment, we hope to offer support to a wide range of potential applications.
+# VRX — Coastal Survey Simulation (Virginia Tech)
 
-## A new modernization development: Gazebo Harmonic and ROS 2 Jazzy
+Simulation environment for the **VT side** of the 4-VA collaborative project
+*AI-Powered Autonomous Coastal Monitoring and 3D Change Detection for Coastal
+Resilience Using Autonomous Surface Vehicles* (VT × ODU).
 
-> [!NOTE]
-> This development effort was executed by the
-> [Honu Robotics](https://honurobotics.com) team, thanks to the sponsorship
-> of [RoboNation](https://robonation.org/).
+This is a fork of [VRX](https://github.com/osrf/vrx) (Gazebo Harmonic + ROS 2
+Jazzy) with coastal survey content added for ASV mapping and change-detection
+work:
 
-We are happy to announce that the repository has been ported to use supported
-versions of Gazebo and ROS 2:
-  * Code is now working with Gazebo Harmonic and ROS 2 Jazzy
-  * This is the recommended configuration for new users.
-  * Users who wish to continue running Gazebo Garden and ROS 2 Humble can still do so using the `humble` branch of this repository.
+* **Coastal worlds** — a still-water reservoir (Claytor Lake test), a sea-cliff
+  coast, an NBS surf zone (living shoreline, oyster sills, breakwaters), and a
+  real NOAA topobathy site at Ocean View, Norfolk VA. The cliff and NBS worlds
+  come in three repeat-survey epochs with exact change ground truth.
+* **Survey WAM-V** — 3D LiDAR, an Omniscan 3D 450 SS sonar proxy, IMU, GPS,
+  camera and ground-truth odometry, with material-dependent intensity.
+* **Launch + RViz** — one command brings up a world, the vessel and a preset
+  RViz layout.
 
-## The VRX Competition
-The VRX environment is also the "virtual venue" for the [VRX Competition](https://github.com/osrf/vrx/wiki). Please see our Wiki for tutorials and links to registration and documentation relevant to the virtual competition.
+The upstream VRX README is kept as [README2.md](README2.md).
+Full details of the coastal content are in
+[`vrx_gz/worlds/coastal/README.md`](vrx_gz/worlds/coastal/README.md).
 
-[![VRX](images/sydney_regatta_gzsim.png)](https://vimeo.com/851696025 "Gazebo Virtual RobotX v. 2.3 - Click to Watch!")
-![ROS 2 CI](https://github.com/osrf/vrx/workflows/ROS%202%20CI/badge.svg)
+## Requirements
 
-## Getting Started
+* Ubuntu 24.04, ROS 2 Jazzy, Gazebo Harmonic (`ros-jazzy-desktop`,
+  `ros-jazzy-ros-gz`, `ros-jazzy-rviz2`)
+* Python: `numpy scipy pillow matplotlib pyyaml` (+ `rasterio` for the real
+  NOAA world)
+* A GPU is strongly recommended (the LiDAR and sonar are GPU ray sensors).
 
- * Watch the [Release 2.3 Highlight Video](https://vimeo.com/851696025).
- * The [VRX Wiki](https://github.com/osrf/vrx/wiki) provides documentation and tutorials.
- * The instructions assume a basic familiarity with the ROS environment and Gazebo.  If these tools are new to you, we recommend starting with the excellent [ROS Tutorials](http://wiki.ros.org/ROS/Tutorials)
- * For technical problems, please use the [project issue tracker](https://github.com/osrf/vrx/issues) to describe your problem or request support.
+The team Docker image already contains all of this — see the `docker/`
+directory of the project workspace (`docker/build.sh`, `docker-compose.yml`),
+which is kept outside this repository.
 
-## Reference
+## Install
 
-If you use the VRX simulation in your work, please cite our summary publication, [Toward Maritime Robotic Simulation in Gazebo](https://wiki.nps.edu/display/BB/Publications?preview=/1173263776/1173263778/PID6131719.pdf):
+```bash
+# 1. clone into a colcon workspace
+mkdir -p ~/workspace/simulator && cd ~/workspace/simulator
+git clone git@github.com:RounLee-VT/vrx.git
+
+# 2. generate the terrain (~700 MB of meshes, textures and ground truth).
+#    These are generated, not tracked in git; run this once after cloning.
+cd vrx/vrx_gz/worlds/coastal/scripts
+pip install -r requirements.txt
+./generate_all.sh            # ~40 s; --skip-ocean-view to skip the NOAA download
+
+# 3. build
+cd ~/workspace/simulator
+colcon build --merge-install
+source install/setup.bash
+```
+
+## Run
+
+```bash
+ros2 launch vrx_gz coastal_survey.launch.py world:=cliff_coast_epoch0
+```
+
+| World | Purpose |
+|---|---|
+| `claytor_lake_calm` | still-water ground-truth test (mapping accuracy, calibration targets) |
+| `cliff_coast_epoch0/1/2` | sea-cliff erosion, 3D change detection |
+| `nbs_surf_epoch0/1/2` | surf zone / nature-based solution monitoring |
+| `ocean_view_norfolk` | real Hampton Roads topobathy (NOAA CUDEM) |
+
+Options: `rviz:=false`, `headless:=true`, and spawn overrides
+`x:= y:= z:= R:= P:= yaw:=` (defaults in `vrx_gz/config/coastal_spawn_poses.yaml`).
+
+Keyboard teleop, in a second terminal:
+
+```bash
+python3 ~/workspace/simulator/vrx/controller.py
+```
+
+Main topics:
+
+| Data | Topic |
+|---|---|
+| LiDAR (above water, with intensity) | `/wamv/sensors/lidars/lidar_wamv_sensor/points_filtered` |
+| Sonar point cloud | `/wamv/sensors/sonars/omniscan3d/points` |
+| Sonar `OS3D_POINT_SET` packets | `/wamv/sensors/sonars/omniscan3d/os3d_point_set` |
+| IMU / GPS | `/wamv/sensors/imu/imu/data`, `/wamv/sensors/gps/gps/fix` |
+| Ground-truth pose | `/wamv/ground_truth/odometry` |
+
+Ground truth for each world (DEMs, class masks, change maps, material maps) is
+written to `vrx_gz/worlds/coastal/ground_truth/`.
+
+## Reference and acknowledgements
+
+This work builds on **VRX** by Open Source Robotics Foundation and
+contributors, ported to Gazebo Harmonic / ROS 2 Jazzy by
+[Honu Robotics](https://honurobotics.com) with sponsorship from
+[RoboNation](https://robonation.org). VRX is released under the Apache 2.0
+license; please cite their publication when using the simulator:
 
 ```
 @InProceedings{bingham19toward,
-  Title                    = {Toward Maritime Robotic Simulation in Gazebo},
-  Author                   = {Brian Bingham and Carlos Aguero and Michael McCarrin and Joseph Klamo and Joshua Malia and Kevin Allen and Tyler Lum and Marshall Rawson and Rumman Waqar},
-  Booktitle                = {Proceedings of MTS/IEEE OCEANS Conference},
-  Year                     = {2019},
-  Address                  = {Seattle, WA},
-  Month                    = {October}
+  Title     = {Toward Maritime Robotic Simulation in Gazebo},
+  Author    = {Brian Bingham and Carlos Aguero and Michael McCarrin and
+               Joseph Klamo and Joshua Malia and Kevin Allen and Tyler Lum and
+               Marshall Rawson and Rumman Waqar},
+  Booktitle = {Proceedings of MTS/IEEE OCEANS Conference},
+  Year      = {2019},
+  Address   = {Seattle, WA},
+  Month     = {October}
 }
 ```
-## 🛠️ Getting Help and Contributing
 
-VRX is an open source project supported by the community. If you run into issues, need help, or have suggestions:
+Data and specifications used by the coastal content:
 
-- 💬 **Ask for help or report bugs** by opening an [issue](https://github.com/osrf/vrx/issues). Please include as much detail as possible, including:
-  - Steps to reproduce the issue
-  - Your system setup (OS, ROS version, etc.)
-  - Relevant error messages or logs
+* **Terrain** — NOAA NCEI *Continuously Updated Digital Elevation Model
+  (CUDEM), 1/9 arc-second Bathymetric-Topographic Tiles* (tile
+  `ncei19_n37x00_w076x25_2019v1`, NAD83 / NAVD88), via
+  [NOAA Digital Coast](https://coast.noaa.gov/htdata/raster2/elevation/NCEI_ninth_Topobathy_2014_8483/).
+* **Sonar** — [Cerulean Sonar Omniscan 3D](https://docs.ceruleansonar.com/c/omniscan3d)
+  published specifications and packet API, used to build the simulated sensor.
+  Not affiliated with or endorsed by Cerulean Sonar.
+* Sonar backscatter values follow typical ranges in the APL-UW *High-Frequency
+  Ocean Environmental Models Handbook* (TR 9407).
 
-- 🛠️ **Found a fix or improvement?** We welcome contributions! Submit a [pull request](https://github.com/osrf/vrx/pulls) with your proposed changes.
-
-- 📫 **Please do not email the maintainers with technical questions.** Using GitHub issues helps ensure that questions and solutions are visible and searchable for the whole community.
-
-Your feedback and participation help make VRX better for everyone — thank you for contributing!
-
-## Contributors
-
-We continue to receive important improvements from the community.  We have done our best to document this on our [Contributors Wiki](https://github.com/osrf/vrx/wiki/Contributors).
-
+Project support: 4-VA Collaborative Research Grant (VT PI Dr. Mingi Jeong,
+Kevin T. Crofton Department of Aerospace and Ocean Engineering; ODU Co-PI
+Dr. Hyun Dong Kim).
