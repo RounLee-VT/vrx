@@ -190,6 +190,10 @@ ament_python_install_package(
   PACKAGE_DIR src/vrx_gz
 )
 
+install(PROGRAMS
+  scripts/lidar_water_filter.py
+  DESTINATION lib/${PROJECT_NAME})
+
 #============================================================================
 # Resources
 install(DIRECTORY

@@ -1,0 +1,9 @@
+# Default WAM-V spawn pose per world: [x, y, z, roll, pitch, yaw] (ENU, m / rad).
+claytor_lake_calm:  [-60.0, 20.0, 0.0, 0.0, 0.0, 0.0]
+nbs_surf_epoch0:    [0.0, 240.0, 0.0, 0.0, 0.0, -1.5708]
+nbs_surf_epoch1:    [0.0, 240.0, 0.0, 0.0, 0.0, -1.5708]
+nbs_surf_epoch2:    [0.0, 240.0, 0.0, 0.0, 0.0, -1.5708]
+ocean_view_norfolk: [-200.0, 250.0, 0.0, 0.0, 0.0, -1.5708]
+cliff_coast_epoch0: [0.0, 170.0, 0.0, 0.0, 0.0, -1.5708]
+cliff_coast_epoch1: [0.0, 170.0, 0.0, 0.0, 0.0, -1.5708]
+cliff_coast_epoch2: [0.0, 170.0, 0.0, 0.0, 0.0, -1.5708]
