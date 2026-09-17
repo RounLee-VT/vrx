@@ -119,7 +119,3 @@ Data and specifications used by the coastal content:
   Not affiliated with or endorsed by Cerulean Sonar.
 * Sonar backscatter values follow typical ranges in the APL-UW *High-Frequency
   Ocean Environmental Models Handbook* (TR 9407).
-
-Project support: 4-VA Collaborative Research Grant (VT PI Dr. Mingi Jeong,
-Kevin T. Crofton Department of Aerospace and Ocean Engineering; ODU Co-PI
-Dr. Hyun Dong Kim).
